@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Elevator Bank Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=DotGothic16&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>Elevator Bank</h1>
+    <p class="sub" id="subtitle">3 cars · 12 floors · group control</p>
+  </div>
+  <div class="transport">
+    <button id="playBtn" class="btn btn-primary" type="button" aria-pressed="true">Pause</button>
+    <div class="seg" role="group" aria-label="Simulation speed" id="speedSeg">
+      <button type="button" data-speed="1">1×</button>
+      <button type="button" data-speed="3">3×</button>
+      <button type="button" data-speed="10">10×</button>
+      <button type="button" data-speed="30">30×</button>
+    </div>
+    <span class="clock" id="clock" aria-label="Simulated time">00:00:00</span>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="building-wrap" aria-label="Elevator shafts">
+    <div class="building" id="building"></div>
+    <p class="hint">Press a hall button to add a passenger at that floor. ▲▼ marks show who is waiting: grey under 30 s, amber under 60 s, red beyond.</p>
+  </section>
+
+  <aside class="panel">
+    <section class="block">
+      <h2>Tenant complaints</h2>
+      <div class="scenes" id="scenes"></div>
+    </section>
+
+    <section class="block">
+      <h2>Service since reset</h2>
+      <dl class="kpis" id="kpis"></dl>
+    </section>
+
+    <section class="block">
+      <h2>Cars <span class="plate">Rated load 1000 kg · 13 persons</span></h2>
+      <div class="cars" id="carStatus"></div>
+    </section>
+
+    <section class="block">
+      <h2>Dispatch</h2>
+      <div class="strategies" id="strategies" role="radiogroup" aria-label="Dispatch strategy"></div>
+    </section>
+
+    <section class="block">
+      <h2>Traffic</h2>
+      <div class="form-grid">
+        <label for="pattern">Pattern</label>
+        <select id="pattern"></select>
+        <label for="rate">Arrivals</label>
+        <div class="range-row">
+          <input id="rate" type="range" min="0" max="30" step="1">
+          <output id="rateOut" for="rate"></output>
+        </div>
+        <label for="tripFrom">Add trip</label>
+        <div class="trip-row">
+          <select id="tripFrom" aria-label="From floor"></select>
+          <span aria-hidden="true">→</span>
+          <select id="tripTo" aria-label="To floor"></select>
+          <button id="tripBtn" class="btn" type="button">Add</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>Building</h2>
+      <div class="form-grid">
+        <label for="floors">Floors</label>
+        <input id="floors" type="number" min="4" max="20" step="1">
+        <label for="seed">Seed</label>
+        <input id="seed" type="number" min="1" step="1">
+        <span></span>
+        <label class="check"><input id="park" type="checkbox"> Return an idle car to the lobby</label>
+        <span></span>
+        <button id="resetBtn" class="btn" type="button">Reset simulation</button>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>Controller log</h2>
+      <ol class="log" id="log"></ol>
+    </section>
+  </aside>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

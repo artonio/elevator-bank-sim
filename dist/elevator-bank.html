@@ -1,0 +1,2370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Elevator Bank Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=DotGothic16&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: building elevation on the left (floors × 3 shafts), control panel on the right; stacks on narrow screens. */
+:root {
+  --bg: #e6e9ec;
+  --surface: #f4f5f7;
+  --ink: #1a1f25;
+  --muted: #5a6470;
+  --line: #c6ccd3;
+  --shaft: #d3d8de;
+  --car: #aeb6bf;
+  --car-edge: #8c96a1;
+  --cab: #fff4dc;
+  --lit: #e08600;
+  --lit-glow: rgba(224, 134, 0, 0.35);
+  --up: #1d8655;
+  --down: #c13f36;
+  --warn: #c97a00;
+  --display-bg: #16191d;
+  --display-ink: #ffb347;
+  --focus: #2266cc;
+  --font-display: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --font-body: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-data: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-dot: 'DotGothic16', 'IBM Plex Mono', monospace;
+  --row-h: 40px;
+  --shaft-w: 84px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --surface: #191d22; --ink: #e5e8eb; --muted: #8e98a3; --line: #2c333b;
+    --shaft: #0c0f12; --car: #5d6670; --car-edge: #7b8590; --cab: #3a3324;
+    --lit: #ffad33; --lit-glow: rgba(255, 173, 51, 0.35); --up: #3fcf8e; --down: #ff6e61; --warn: #ffb347;
+    --display-bg: #07090b; --display-ink: #ffb347; --focus: #6aa5ff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --surface: #191d22; --ink: #e5e8eb; --muted: #8e98a3; --line: #2c333b;
+  --shaft: #0c0f12; --car: #5d6670; --car-edge: #7b8590; --cab: #3a3324;
+  --lit: #ffad33; --lit-glow: rgba(255, 173, 51, 0.35); --up: #3fcf8e; --down: #ff6e61; --warn: #ffb347;
+  --display-bg: #07090b; --display-ink: #ffb347; --focus: #6aa5ff;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.45 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 32px;
+}
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- top bar */
+.topbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px 24px; max-width: 1240px; margin: 0 auto 16px;
+}
+.brand h1 {
+  font: 700 2rem/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; margin: 0;
+}
+.brand .sub { margin: 4px 0 0; color: var(--muted); font-size: 0.9rem; }
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.clock {
+  font: 1.15rem/1 var(--font-dot); color: var(--display-ink); background: var(--display-bg);
+  padding: 7px 10px; border-radius: 4px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums;
+}
+
+.btn {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; font-weight: 500;
+}
+.btn:hover { border-color: var(--muted); }
+.btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); min-width: 5.5em; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button {
+  border: 0; background: var(--surface); padding: 6px 10px; cursor: pointer;
+  font-family: var(--font-data); font-size: 0.85rem;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--ink); color: var(--bg); }
+
+/* ---------- layout */
+.layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px;
+  max-width: 1240px; margin: 0 auto; align-items: start;
+}
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- building */
+.building-wrap { min-width: 0; }
+.building {
+  max-width: 660px;
+  display: grid;
+  grid-template-columns: 2.4rem 2.6rem minmax(0, 1fr) repeat(var(--cars, 3), var(--shaft-w));
+  column-gap: 6px;
+  position: relative;
+}
+.indicator {
+  grid-row: 1; height: 38px; margin-bottom: 8px; border-radius: 4px; background: var(--display-bg);
+  color: var(--display-ink); display: flex; align-items: center; justify-content: center; gap: 4px;
+  font: 1.05rem/1 var(--font-dot);
+}
+.indicator .letter { color: var(--muted); font: 600 0.75rem/1 var(--font-display); margin-right: 4px; }
+.indicator .arrow { width: 0.9em; text-align: center; }
+.floor-label, .hall, .waiting {
+  height: var(--row-h); display: flex; align-items: center;
+  border-top: 1px solid var(--line);
+}
+.floor-label { font: 600 1.05rem/1 var(--font-display); justify-content: center; }
+.floor-label.lobby { color: var(--lit); }
+.hall { flex-direction: column; justify-content: center; gap: 2px; align-items: flex-start; }
+.hall-btn {
+  display: flex; align-items: center; gap: 3px; border: 0; background: none; padding: 0; cursor: pointer;
+  height: calc((var(--row-h) - 6px) / 2); min-height: 14px;
+}
+.hall-btn .dot {
+  width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--car-edge); background: var(--surface);
+  display: grid; place-items: center; font-size: 7px; line-height: 1; color: var(--muted);
+}
+.hall-btn.lit .dot { border-color: var(--lit); color: var(--lit); box-shadow: 0 0 0 3px var(--lit-glow); }
+.hall-btn .tag { font: 500 0.68rem/1 var(--font-data); color: var(--lit); width: 0.8em; }
+.hall-btn.none { visibility: hidden; }
+.waiting { justify-content: flex-end; gap: 1px; padding-right: 4px; overflow: hidden; color: var(--muted); }
+.waiting i { font-style: normal; font-size: 9px; line-height: 1; }
+.waiting i.warm { color: var(--warn); }
+.waiting i.hot { color: var(--down); }
+.waiting .more { font: 0.7rem/1 var(--font-data); margin-left: 3px; }
+
+.shaft {
+  position: relative; border-radius: 3px; background-color: var(--shaft);
+  background-image: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px var(--row-h));
+}
+.car {
+  position: absolute; left: 5px; right: 5px; top: 0; height: calc(var(--row-h) - 4px);
+  border: 1px solid var(--car-edge); border-radius: 3px; overflow: hidden;
+  background: var(--cab); will-change: transform;
+}
+.car .riders {
+  position: absolute; inset: 4px 4px 7px; display: flex; flex-wrap: wrap; align-content: center;
+  justify-content: center; gap: 2px;
+}
+.car .riders b { width: 5px; height: 5px; border-radius: 50%; background: var(--ink); opacity: 0.7; }
+.door {
+  position: absolute; top: 0; bottom: 3px; width: 50%;
+  background: linear-gradient(90deg, var(--car), var(--car-edge) 140%);
+}
+.door.l { left: 0; transform-origin: left; border-right: 1px solid var(--car-edge); }
+.door.r { right: 0; transform-origin: right; }
+.car .loadbar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--muted); width: 0; }
+.car .lantern {
+  position: absolute; top: 1px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; line-height: 1; z-index: 2;
+}
+.lantern.up { color: var(--up); }
+.lantern.down { color: var(--down); }
+.car.overload { border-color: var(--down); box-shadow: 0 0 0 1px var(--down); }
+.hint { color: var(--muted); font-size: 0.85rem; margin: 12px 0 0; max-width: 60ch; }
+
+/* ---------- panel */
+.panel { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.block h2 {
+  font: 600 0.82rem/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--muted); margin: 0 0 10px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+}
+.plate { font: 500 0.72rem/1 var(--font-data); letter-spacing: 0; text-transform: none; }
+
+.kpis {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0;
+  border-top: 1px solid var(--line); border-left: 1px solid var(--line);
+}
+.kpis div { padding: 8px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.kpis dt { font-size: 0.75rem; color: var(--muted); }
+.kpis dd { margin: 2px 0 0; font: 500 1.2rem/1.2 var(--font-data); font-variant-numeric: tabular-nums; }
+.kpis dd small { font-size: 0.7rem; color: var(--muted); margin-left: 2px; }
+
+.cars { display: flex; flex-direction: column; }
+.car-row {
+  display: grid; grid-template-columns: 1.6rem 2.6rem minmax(0, 1fr) 6.5rem; gap: 8px; align-items: center;
+  padding: 7px 0; border-top: 1px solid var(--line);
+}
+.car-row .badge {
+  font: 700 0.9rem/1 var(--font-display); background: var(--ink); color: var(--bg);
+  border-radius: 3px; text-align: center; padding: 4px 0;
+}
+.car-row .pos { font: 1.05rem/1 var(--font-dot); color: var(--ink); white-space: nowrap; }
+.car-row .pos .up { color: var(--up); }
+.car-row .pos .down { color: var(--down); }
+.car-row .state { font-size: 0.82rem; min-width: 0; }
+.car-row .state .stops { display: block; color: var(--muted); font: 0.72rem/1.3 var(--font-data); overflow-wrap: anywhere; }
+.car-row .load { font: 0.75rem/1 var(--font-data); color: var(--muted); }
+.car-row .overload { color: var(--down); }
+.car-row.overload .load { color: var(--down); font-weight: 600; }
+.meter { height: 5px; background: var(--shaft); border-radius: 3px; overflow: hidden; margin-bottom: 4px; }
+.meter span { display: block; height: 100%; background: var(--ink); width: 0; }
+
+.strategies, .scenes { display: flex; flex-direction: column; gap: 6px; }
+.strategy, .scene {
+  text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+  padding: 8px 10px; cursor: pointer;
+}
+.strategy strong, .scene strong { font-weight: 600; }
+.strategy span, .scene span { display: block; color: var(--muted); font-size: 0.8rem; line-height: 1.35; }
+.scene:hover { border-color: var(--muted); }
+.strategy[aria-checked="true"] { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--lit); }
+
+.form-grid { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.form-grid > label { font-size: 0.85rem; color: var(--muted); }
+.form-grid select, .form-grid input[type="number"] {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0;
+}
+.range-row, .trip-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.range-row input { flex: 1; min-width: 0; accent-color: var(--lit); }
+.range-row output { font: 0.8rem/1 var(--font-data); white-space: nowrap; min-width: 5.5em; text-align: right; }
+.trip-row select { flex: 1; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 0.85rem; }
+.check input { accent-color: var(--lit); }
+
+.log {
+  list-style: none; margin: 0; padding: 0; font: 0.76rem/1.5 var(--font-data); color: var(--muted);
+  border-top: 1px solid var(--line); max-height: 11.5em; overflow: hidden;
+}
+.log li { padding: 2px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
+.log time { color: var(--ink); opacity: 0.6; flex: none; }
+.log .reassign, .log .serve { color: var(--ink); }
+
+@media (max-width: 480px) {
+  :root { --shaft-w: 52px; }
+  .indicator .letter { display: none; }
+  .brand h1 { font-size: 1.6rem; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>Elevator Bank</h1>
+    <p class="sub" id="subtitle">3 cars · 12 floors · group control</p>
+  </div>
+  <div class="transport">
+    <button id="playBtn" class="btn btn-primary" type="button" aria-pressed="true">Pause</button>
+    <div class="seg" role="group" aria-label="Simulation speed" id="speedSeg">
+      <button type="button" data-speed="1">1×</button>
+      <button type="button" data-speed="3">3×</button>
+      <button type="button" data-speed="10">10×</button>
+      <button type="button" data-speed="30">30×</button>
+    </div>
+    <span class="clock" id="clock" aria-label="Simulated time">00:00:00</span>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="building-wrap" aria-label="Elevator shafts">
+    <div class="building" id="building"></div>
+    <p class="hint">Press a hall button to add a passenger at that floor. ▲▼ marks show who is waiting: grey under 30 s, amber under 60 s, red beyond.</p>
+  </section>
+
+  <aside class="panel">
+    <section class="block">
+      <h2>Tenant complaints</h2>
+      <div class="scenes" id="scenes"></div>
+    </section>
+
+    <section class="block">
+      <h2>Service since reset</h2>
+      <dl class="kpis" id="kpis"></dl>
+    </section>
+
+    <section class="block">
+      <h2>Cars <span class="plate">Rated load 1000 kg · 13 persons</span></h2>
+      <div class="cars" id="carStatus"></div>
+    </section>
+
+    <section class="block">
+      <h2>Dispatch</h2>
+      <div class="strategies" id="strategies" role="radiogroup" aria-label="Dispatch strategy"></div>
+    </section>
+
+    <section class="block">
+      <h2>Traffic</h2>
+      <div class="form-grid">
+        <label for="pattern">Pattern</label>
+        <select id="pattern"></select>
+        <label for="rate">Arrivals</label>
+        <div class="range-row">
+          <input id="rate" type="range" min="0" max="30" step="1">
+          <output id="rateOut" for="rate"></output>
+        </div>
+        <label for="tripFrom">Add trip</label>
+        <div class="trip-row">
+          <select id="tripFrom" aria-label="From floor"></select>
+          <span aria-hidden="true">→</span>
+          <select id="tripTo" aria-label="To floor"></select>
+          <button id="tripBtn" class="btn" type="button">Add</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>Building</h2>
+      <div class="form-grid">
+        <label for="floors">Floors</label>
+        <input id="floors" type="number" min="4" max="20" step="1">
+        <label for="seed">Seed</label>
+        <input id="seed" type="number" min="1" step="1">
+        <span></span>
+        <label class="check"><input id="park" type="checkbox"> Return an idle car to the lobby</label>
+        <span></span>
+        <button id="resetBtn" class="btn" type="button">Reset simulation</button>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>Controller log</h2>
+      <ol class="log" id="log"></ol>
+    </section>
+  </aside>
+</main>
+<script>
+(() => {
+'use strict';
+// ---- src/constants.js
+/**
+ * Travel / service direction of a car or a hall call. 0 means "no committed direction".
+ * Directions are used both as object keys (`car.hallCalls[UP]`) and in arithmetic:
+ * `dir * (target - floor) > 0` means "target is ahead of floor when travelling in dir".
+ * @typedef {1 | -1 | 0} Direction
+ */
+
+/** @type {1} */
+const UP = 1;
+/** @type {-1} */
+const DOWN = -1;
+
+/**
+ * Car controller states. A car goes idle → moving → opening → open → closing, and when
+ * the doors are shut it decides again whether to open, move on, or go idle.
+ * @typedef {'idle' | 'moving' | 'opening' | 'open' | 'closing'} CarStateName
+ */
+const CarState = Object.freeze({
+  IDLE: 'idle',       // stopped at a floor, doors closed, nothing to do
+  MOVING: 'moving',
+  OPENING: 'opening',
+  OPEN: 'open',       // doors fully open, passengers transfer
+  CLOSING: 'closing',
+});
+
+/**
+ * Physical and operational defaults. Figures are typical for a mid-rise office
+ * building served by traction elevators.
+ */
+const DEFAULT_CONFIG = Object.freeze({
+  floors: 12,
+  cars: 3,
+  floorHeight: 3.5,         // m between landings
+  maxSpeed: 2.5,            // m/s rated speed
+  acceleration: 1.0,        // m/s², also used for braking
+  capacity: 13,             // persons (1000 kg rated load at 75 kg per person)
+  ratedLoad: 1000,          // kg; a car weighing more holds its doors open and won't leave
+  doorOpenTime: 1.8,        // s for the doors to open fully
+  doorCloseTime: 2.4,       // s for the doors to close fully
+  minDwell: 2.0,            // s the doors stay fully open before they may close
+  transferTime: 1.2,        // s per passenger boarding or alighting
+  parkIdleAfter: 20,        // s an empty idle car waits before returning to the lobby (0 disables)
+  redispatchInterval: 1.0,  // s between re-evaluations of unanswered hall calls
+});
+
+/**
+ * Building settings: `DEFAULT_CONFIG` with any overrides passed to `new Simulation({ config })`.
+ * The simulation, every car and the dispatcher all read the same object.
+ * @typedef {typeof DEFAULT_CONFIG} Config
+ */
+
+/** Average passenger mass in kg; each car's load reading counts this much per person. */
+const KG_PER_PERSON = 75;
+
+/**
+ * North-American style landing labels: the ground floor is the lobby "L", the next one is 2.
+ * Code always works with floor indices; labels are for display only.
+ * @param {number} index floor index, 0 = lobby
+ * @returns {string} e.g. 'L' for 0, '7' for 6
+ */
+function floorLabel(index) {
+  return index === 0 ? 'L' : String(index + 1);
+}
+
+/**
+ * Arrow for a direction, for display.
+ * @param {Direction} dir
+ * @returns {string} '▲' for UP, '▼' for DOWN, '' for 0
+ */
+function dirArrow(dir) {
+  return dir === UP ? '▲' : dir === DOWN ? '▼' : '';
+}
+
+// ---- src/elevator.js
+
+/** @typedef {import('./constants.js').Direction} Direction */
+/** @typedef {import('./constants.js').CarStateName} CarStateName */
+/** @typedef {import('./constants.js').Config} Config */
+/** @typedef {import('./simulation.js').Passenger} Passenger */
+
+/**
+ * Hooks the simulation passes to each car on every step (`car.step(dt, env)`), so a car
+ * can ask about the building without knowing about passengers or the other cars.
+ * @typedef {object} Env
+ * @property {(floor: number, dir: Direction) => boolean} hallCall
+ *   Is the hall button for `dir` at `floor` lit (assigned to any car)?
+ * @property {(car: Elevator, floor: number, dir: Direction) => void} onServe
+ *   The car is opening at `floor` to answer the hall call for `dir`.
+ * @property {(car: Elevator, floor: number) => boolean} transferOne
+ *   Move one passenger out of or into the car; false when nobody is left to move.
+ * @property {(car: Elevator, floor: number) => boolean} wantsReopen
+ *   Someone arrived who could still board: should the closing doors reopen?
+ */
+
+/** Tolerance, in floors, when comparing a car position with a landing level. */
+const FLOOR_TOL = 1e-3;
+
+/**
+ * One car: motion profile, doors, and its own stop sequence.
+ *
+ * Stop selection is the directional-collective rule (the LOOK disk-scheduling
+ * algorithm): keep travelling in the current direction while there is work ahead,
+ * stopping for car calls and same-direction hall calls. An opposite-direction hall
+ * call is answered only at the far end of the sweep, where the car turns round.
+ *
+ * The car knows nothing about passengers or the other cars. The simulation passes an
+ * `env` object with four hooks (see the `Env` type above):
+ *   hallCall(floor, dir)       is that hall button lit (assigned to any car)?
+ *   onServe(car, floor, dir)   the car is opening to answer that hall direction
+ *   transferOne(car, floor)    move one passenger out or in; false when nobody is left
+ *   wantsReopen(car, floor)    someone arrived who could still board: reopen the doors?
+ *
+ * Positions are in metres (`pos`, measured up from the lobby); floors are indices
+ * (0 = lobby). Most planning methods take fractional floors so they can work from a
+ * position between landings.
+ */
+class Elevator {
+  /**
+   * @param {number} id index of the car in the bank; 0, 1, 2 are shown as A, B, C
+   * @param {Config} cfg building settings shared with the simulation
+   * @param {number} [startFloor=0] floor index the car starts at
+   */
+  constructor(id, cfg, startFloor = 0) {
+    /** @type {number} index in `sim.cars`; hall calls record it as `carId`, and dispatch ties go to the lower id */
+    this.id = id;
+    /** @type {string} letter shown on the page and in the log: 'A' for id 0, 'B' for 1, … */
+    this.name = String.fromCharCode(65 + id);
+    /** @type {Config} building settings; the same object the simulation holds, not a copy */
+    this.cfg = cfg;
+    /** @type {number} position in metres above the lobby; exactly `floor * floorHeight` when stopped at a landing */
+    this.pos = startFloor * cfg.floorHeight;
+    /** @type {number} velocity in m/s, positive is up; 0 whenever the car is not MOVING */
+    this.vel = 0;
+    /**
+     * Direction the car is serving: the way it is travelling, or about to travel from
+     * this floor. Shown by the car's arrows on the page. 0 when it has nothing to do.
+     * @type {Direction}
+     */
+    this.direction = 0;
+    /** @type {CarStateName} what the car is doing now: idle, moving, opening, open or closing */
+    this.state = CarState.IDLE;
+    /** @type {number} how far open the doors are: 0 closed … 1 fully open; the car only moves at 0 */
+    this.door = 0;
+    /** @type {number} seconds of minimum open time left; set to `cfg.minDwell` when the doors finish opening */
+    this.dwell = 0;
+    /** @type {number} seconds left for the passenger in the doorway; each one takes `cfg.transferTime` */
+    this.transfer = 0;
+    /** @type {number | null} floor index the car is driving to while MOVING, re-planned every tick; null otherwise */
+    this.target = null;
+    /**
+     * Seconds the car has been IDLE without a break; reset to 0 in any other state.
+     * The simulation sends a car back to the lobby once this reaches `cfg.parkIdleAfter`.
+     * @type {number}
+     */
+    this.idleTime = 0;
+    /** @type {Passenger[]} riders in the car, in boarding order; `Simulation.transferOne` adds and removes them */
+    this.passengers = [];
+    /** @type {number} reading of the car's load-weighing device, kg; `Simulation.transferOne` updates it */
+    this.loadKg = 0;
+    /**
+     * Floor indices pressed inside the car (and the lobby, when the car is sent to park).
+     * A floor is removed when the car opens there.
+     * @type {Set<number>}
+     */
+    this.carCalls = new Set();
+    /**
+     * Hall calls the dispatcher has assigned to this car, as floor indices per direction:
+     * `hallCalls[UP]` and `hallCalls[DOWN]`. `Simulation.assign` adds a floor; it comes off
+     * when the call moves to another car, when the button goes off (`dropCall`), or when
+     * this car answers it.
+     * @type {Record<number, Set<number>>}
+     */
+    this.hallCalls = { [UP]: new Set(), [DOWN]: new Set() };
+    /** @type {number} total metres travelled; summed over all cars into `stats().distance` */
+    this.distance = 0;
+    /** @type {number} times the doors have opened from fully shut; summed into `stats().stops` */
+    this.stops = 0;
+  }
+
+  // ---------------------------------------------------------------- read-outs
+
+  /** @returns {number} position in floors, fractional between landings (2.5 = halfway between index 2 and 3) */
+  get floatFloor() { return this.pos / this.cfg.floorHeight; }
+  /** @returns {number} index of the nearest landing */
+  get floor() { return Math.round(this.floatFloor); }
+  /** @returns {number} number of passengers aboard */
+  get load() { return this.passengers.length; }
+  /** @returns {boolean} whether the car is full; a full car takes nobody else on and passes hall calls by */
+  get isFull() { return this.passengers.length >= this.cfg.capacity; }
+  /** @returns {boolean} whether the load reading is over the rated load; an overloaded car holds its doors open */
+  get isOverloaded() { return this.loadKg > this.cfg.ratedLoad; }
+  /** @returns {number} current speed in m/s, whichever way the car is moving */
+  get speed() { return Math.abs(this.vel); }
+
+  /**
+   * Fractional floor where the car would come to rest if it braked now.
+   * @returns {number}
+   */
+  get commitFloor() {
+    const brake = (this.vel * this.vel) / (2 * this.cfg.acceleration);
+    return (this.pos + Math.sign(this.vel) * brake) / this.cfg.floorHeight;
+  }
+
+  /**
+   * Every floor this car currently intends to visit, ascending. Shown in the cars panel.
+   * @returns {number[]} floor indices
+   */
+  get plannedStops() {
+    const s = new Set(this.carCalls);
+    for (const f of this.hallCalls[UP]) s.add(f);
+    for (const f of this.hallCalls[DOWN]) s.add(f);
+    return [...s].sort((a, b) => a - b);
+  }
+
+  // ---------------------------------------------------------------- planning
+
+  /**
+   * Floors with work for this car. A full car ignores hall calls (it bypasses them).
+   * @returns {Generator<number>} floor indices; a floor may appear more than once
+   */
+  *requests() {
+    yield* this.carCalls;
+    if (!this.isFull) {
+      yield* this.hallCalls[UP];
+      yield* this.hallCalls[DOWN];
+    }
+  }
+
+  /**
+   * Is there any work strictly beyond `floor` in direction `dir`?
+   * @param {number} floor fractional floor to look from
+   * @param {Direction} dir UP or DOWN
+   * @returns {boolean}
+   */
+  hasRequestsBeyond(floor, dir) {
+    for (const g of this.requests()) if (dir * (g - floor) > FLOOR_TOL) return true;
+    return false;
+  }
+
+  /**
+   * The requested floor closest to `floor`; on a tie, the lower one.
+   * @param {number} floor fractional floor to measure from
+   * @param {number | null} [exclude=null] a floor index to ignore
+   * @returns {number | null} floor index, or null when there is no other request
+   */
+  nearestRequest(floor, exclude = null) {
+    let best = null;
+    for (const g of this.requests()) {
+      if (g === exclude) continue;
+      const d = Math.abs(g - floor);
+      if (best === null || d < Math.abs(best - floor) || (d === Math.abs(best - floor) && g < best)) best = g;
+    }
+    return best;
+  }
+
+  /**
+   * Would the car stop at floor g while travelling in dir? Car calls always count; a full
+   * car passes hall calls by; an opposite-direction hall call counts only where the sweep
+   * ends (nothing further ahead).
+   * @param {number} g floor index
+   * @param {Direction} dir UP or DOWN
+   * @returns {boolean}
+   */
+  wantsStopAt(g, dir) {
+    if (this.carCalls.has(g)) return true;
+    if (this.isFull) return false;
+    if (this.hallCalls[dir].has(g)) return true;
+    return this.hallCalls[-dir].has(g) && !this.hasRequestsBeyond(g, dir);
+  }
+
+  /**
+   * Next floor to stop at travelling in dir from fractional floor `from`.
+   * `inclusive` lets the floor exactly at `from` count (used for a moving car,
+   * where `from` is the braking point).
+   * @param {Direction} dir UP or DOWN
+   * @param {number} from fractional floor
+   * @param {boolean} inclusive
+   * @returns {number | null} floor index, or null when there is nothing to stop for
+   */
+  nextStop(dir, from, inclusive) {
+    const n = this.cfg.floors;
+    let g = dir > 0
+      ? (inclusive ? Math.ceil(from - FLOOR_TOL) : Math.floor(from + FLOOR_TOL) + 1)
+      : (inclusive ? Math.floor(from + FLOOR_TOL) : Math.ceil(from - FLOOR_TOL) - 1);
+    for (; g >= 0 && g < n; g += dir) if (this.wantsStopAt(g, dir)) return g;
+    return null;
+  }
+
+  /**
+   * Direction the car should serve when standing at floor f. Its own commitments
+   * come first; with none, it takes whichever hall call is waiting here.
+   * @param {number} f floor index the car is standing at
+   * @param {Env} env
+   * @returns {Direction} 0 when there is nothing to do
+   */
+  chooseDirectionAt(f, env) {
+    const own = (d) => !this.isFull && this.hallCalls[d].has(f);
+    const beyond = (d) => this.hasRequestsBeyond(f, d);
+    const d0 = this.direction;
+    if (d0 !== 0) {
+      if (beyond(d0) || own(d0)) return d0;
+      if (beyond(-d0) || own(-d0)) return -d0;
+    } else {
+      if (own(UP) && own(DOWN)) return beyond(DOWN) && !beyond(UP) ? DOWN : UP;
+      if (own(UP)) return UP;
+      if (own(DOWN)) return DOWN;
+      const g = this.nearestRequest(f, f);
+      if (g !== null) return g > f ? UP : DOWN;
+    }
+    if (env.hallCall(f, UP)) return UP;
+    if (env.hallCall(f, DOWN)) return DOWN;
+    return 0;
+  }
+
+  /**
+   * Should a car standing at floor `f` with its doors shut open them now, given the
+   * direction it has chosen to serve from here?
+   *
+   * HINT, complaint 1 (doors keep opening and closing): the fix belongs in this function.
+   * @param {number} f floor index the car is standing at
+   * @param {Direction} dir direction from `chooseDirectionAt`; 0 if it has none
+   * @param {Env} env
+   * @returns {boolean}
+   */
+  shouldOpenAt(f, dir, env) {
+    // Someone inside asked for this floor: open, whatever the direction.
+    if (this.carCalls.has(f)) return true;
+    // A full car takes nobody else on, so it opens only for riders getting out (checked above).
+    // dir is 0 when chooseDirectionAt found nothing to do from here.
+    if (this.isFull || dir === 0) return false;
+    // Open if any of these holds: this car is assigned the `dir` hall call at f; the `dir`
+    // button at f is lit, whichever car it is assigned to; the button at f for the
+    // opposite direction (-dir) is lit.
+    return this.hallCalls[dir].has(f) || env.hallCall(f, dir) || env.hallCall(f, -dir);
+  }
+
+  /**
+   * Called whenever the car is stationary at a floor with doors closed: after it
+   * arrives, after the doors shut, and on every tick while idle. Either opens the
+   * doors here, sets off toward the next stop, or goes idle.
+   * @param {Env} env
+   */
+  decideNext(env) {
+    const f = this.floor;
+    const dir = this.chooseDirectionAt(f, env);
+    if (this.shouldOpenAt(f, dir, env)) {
+      this.direction = dir;
+      this.beginOpening(env, f);
+      return;
+    }
+    if (dir === 0 || !this.hasRequestsBeyond(f, dir)) {
+      this.direction = 0;
+      this.target = null;
+      this.state = CarState.IDLE;
+      return;
+    }
+    this.direction = dir;
+    this.target = this.nextStop(dir, f, false);
+    this.state = CarState.MOVING;
+  }
+
+  /**
+   * Start opening the doors at floor `f`. Clears the car call for this floor and, when
+   * the car has a direction, takes this floor's hall call for that direction off its
+   * list and tells the simulation it is answering it.
+   * @param {Env} env
+   * @param {number} f floor index
+   */
+  beginOpening(env, f) {
+    if (this.door <= 0) this.stops++;
+    this.state = CarState.OPENING;
+    this.target = null;
+    this.carCalls.delete(f);
+    if (this.direction !== 0) {
+      this.hallCalls[this.direction].delete(f);
+      env.onServe(this, f, this.direction);
+    }
+  }
+
+  // ---------------------------------------------------------------- stepping
+
+  /**
+   * Advance this car by one time step. The simulation calls it once per tick for each car.
+   * @param {number} dt seconds
+   * @param {Env} env
+   */
+  step(dt, env) {
+    switch (this.state) {
+      case CarState.IDLE: this.idleTime += dt; this.decideNext(env); break;
+      case CarState.MOVING: this.stepMoving(dt, env); break;
+      case CarState.OPENING: this.stepOpening(dt); break;
+      case CarState.OPEN: this.stepOpen(dt, env); break;
+      case CarState.CLOSING: this.stepClosing(dt, env); break;
+    }
+    if (this.state !== CarState.IDLE) this.idleTime = 0;
+  }
+
+  /**
+   * MOVING: re-plan the stop ahead, drive toward it, and decide what to do on arrival.
+   * @param {number} dt seconds
+   * @param {Env} env
+   */
+  stepMoving(dt, env) {
+    const { floorHeight: H, maxSpeed: vmax, acceleration: a, floors } = this.cfg;
+    const dir = this.direction;
+
+    // Re-plan every tick: a new request ahead of the braking point can still be taken.
+    const plan = this.nextStop(dir, this.commitFloor, true);
+    const wanted = this.target !== null && this.wantsStopAt(this.target, dir);
+    if (plan !== null && (!wanted || dir * (plan - this.target) < 0)) {
+      this.target = plan;
+    } else if (plan === null && !wanted) {
+      // Nothing left ahead (a call was reassigned away): stop at the first reachable floor.
+      const ahead = this.target !== null && dir * (this.target - this.floatFloor) > -FLOOR_TOL;
+      if (!ahead) {
+        const c = this.commitFloor;
+        const g = dir > 0 ? Math.ceil(c - FLOOR_TOL) : Math.floor(c + FLOOR_TOL);
+        this.target = Math.max(0, Math.min(floors - 1, g));
+      }
+    }
+
+    if (this.drive(this.target * H, dt, vmax, a)) {
+      this.target = null;
+      this.decideNext(env);
+    }
+  }
+
+  /**
+   * Trapezoidal motion profile toward `goal` (m): accelerate, cruise, brake to stop exactly. True on arrival.
+   * @param {number} goal target position in metres
+   * @param {number} dt seconds
+   * @param {number} vmax top speed, m/s
+   * @param {number} a acceleration and braking, m/s²
+   * @returns {boolean} true once the car is stopped at `goal`
+   */
+  drive(goal, dt, vmax, a) {
+    const d = goal - this.pos;
+    const s = Math.sign(d);
+    const vWanted = s * Math.min(vmax, Math.sqrt(2 * a * Math.abs(d)));
+    this.vel += Math.max(-a * dt, Math.min(a * dt, vWanted - this.vel));
+    const prev = this.pos;
+    this.pos += this.vel * dt;
+    if (s === 0 || Math.sign(goal - this.pos) !== s || Math.abs(goal - this.pos) < 1e-4) {
+      this.distance += Math.abs(goal - prev);
+      this.pos = goal;
+      this.vel = 0;
+      return true;
+    }
+    this.distance += Math.abs(this.pos - prev);
+    return false;
+  }
+
+  /**
+   * OPENING: open the doors a little more; once fully open, start the minimum dwell.
+   * @param {number} dt seconds
+   */
+  stepOpening(dt) {
+    this.door = Math.min(1, this.door + dt / this.cfg.doorOpenTime);
+    if (this.door >= 1) {
+      this.state = CarState.OPEN;
+      this.dwell = this.cfg.minDwell;
+      this.transfer = 0;
+    }
+  }
+
+  /**
+   * OPEN: move passengers one at a time (each takes `transferTime`), then start closing
+   * once nobody is in the doorway, the minimum dwell is over and the car is not overloaded.
+   * @param {number} dt seconds
+   * @param {Env} env
+   */
+  stepOpen(dt, env) {
+    if (this.transfer > 0) this.transfer -= dt;
+    if (this.transfer <= 0) {
+      if (env.transferOne(this, this.floor)) this.transfer += this.cfg.transferTime;
+      else this.transfer = 0;
+    }
+    this.dwell -= dt;
+    if (this.transfer <= 0 && this.dwell <= 0 && !this.isOverloaded) this.state = CarState.CLOSING;
+  }
+
+  /**
+   * CLOSING: reopen if someone who could board has arrived; otherwise close a little
+   * more, and once the doors are shut decide what to do next.
+   * @param {number} dt seconds
+   * @param {Env} env
+   */
+  stepClosing(dt, env) {
+    const f = this.floor;
+    if (env.wantsReopen(this, f)) {
+      this.beginOpening(env, f);
+      return;
+    }
+    this.door = Math.max(0, this.door - dt / this.cfg.doorCloseTime);
+    if (this.door <= 0) this.decideNext(env);
+  }
+
+  /**
+   * Cheap copy that only carries what the planner reads. Used by the ETA dispatcher.
+   * Only the planning methods (`requests` to `chooseDirectionAt`) work on the copy.
+   * @returns {Elevator} a stationary, empty copy with the same position, direction and calls
+   */
+  planningCopy() {
+    const g = Object.create(Elevator.prototype);
+    g.cfg = this.cfg;
+    g.pos = this.pos;
+    g.vel = 0;
+    g.direction = this.direction;
+    g.carCalls = new Set(this.carCalls);
+    g.hallCalls = { [UP]: new Set(this.hallCalls[UP]), [DOWN]: new Set(this.hallCalls[DOWN]) };
+    g.passengers = []; // capacity is priced separately by the dispatcher
+    return g;
+  }
+}
+
+// ---- src/dispatch.js
+
+/** @typedef {import('./constants.js').Direction} Direction */
+/** @typedef {import('./constants.js').Config} Config */
+/** @typedef {import('./elevator.js').Elevator} Elevator */
+/** @typedef {import('./simulation.js').Simulation} Simulation */
+/** @typedef {import('./simulation.js').HallCall} HallCall */
+
+/**
+ * One predicted stop on a car's route.
+ * @typedef {object} RouteStop
+ * @property {number} t seconds from now until the car opens its doors there
+ * @property {number} floor floor index
+ * @property {Direction} dir hall-call direction served, or 0 for a car call
+ * @property {boolean} full whether the car is expected to arrive full (it would pass the hall call by)
+ */
+
+/**
+ * A car picked for a hall call, with the cost the strategy gave it.
+ * @typedef {object} Choice
+ * @property {Elevator} car
+ * @property {number} cost lower is better; 0 for strategies that don't price cars
+ */
+
+/**
+ * A dispatch strategy. It has either `cost` (lower wins, and `chooseCar` asks every car)
+ * or `choose` (picks a car directly).
+ * @typedef {object} Strategy
+ * @property {string} id key in `STRATEGIES`, e.g. 'eta'
+ * @property {string} label name shown on the page
+ * @property {string} summary one-line description shown on the page
+ * @property {boolean} reassign may `redispatch` move an unanswered call to a better car later?
+ * @property {number} hysteresis how much lower another car's cost must be before a call moves to it
+ * @property {(sim: Simulation, car: Elevator, call: HallCall) => number} [cost]
+ * @property {(sim: Simulation, call: HallCall) => Choice} [choose]
+ */
+
+/** Hall calls arrive here; the dispatcher picks which car answers each one. */
+
+/**
+ * Seconds to travel `distance` metres from rest to rest with a trapezoidal profile.
+ * @param {number} distance metres
+ * @param {Config} cfg reads `maxSpeed` and `acceleration`
+ * @returns {number} seconds
+ */
+function travelTime(distance, cfg) {
+  if (distance <= 0) return 0;
+  const { maxSpeed: v, acceleration: a } = cfg;
+  const rampDistance = (v * v) / a; // accelerate to v, then brake from v
+  // Long trip: speed up to v, cruise, brake, which takes distance / v + v / a.
+  // Short trip: the car never reaches v; it speeds up for half the distance and brakes
+  // for the other half, which takes 2 √(distance / a).
+  return distance >= rampDistance ? distance / v + v / a : 2 * Math.sqrt(distance / a);
+}
+
+/** Stand-in `env` for planning: no hall buttons are lit, so only the car's own calls count. */
+const NO_HALL_CALLS = Object.freeze({ hallCall: () => false });
+
+/** Map key for a hall call in `simulateRoute`'s result, e.g. 'h-1:6' for Down at index 6. */
+const hallKey = (dir, floor) => `h${dir}:${floor}`;
+/** Map key for a car call in `simulateRoute`'s result, e.g. 'c9'. */
+const carKey = (floor) => `c${floor}`;
+
+/**
+ * Predicts when `car` will serve each of its commitments by walking its LOOK sequence
+ * stop by stop: travel time between stops plus a full door cycle at every stop.
+ * `extra` is a hall call to add to the plan, `exclude` one to take out of it.
+ *
+ * With `sim`, it also projects the load: riders leave at their floors, and everyone
+ * waiting at a hall stop is expected to board. Their destinations are unknown, so they
+ * are assumed to be gone by the end of the sweep. A hall stop reached with a projected
+ * full car is flagged `full` (the real car would bypass it).
+ *
+ * Returns a Map from commitment key to { t: seconds from now, floor, dir, full }
+ * where dir 0 marks a car call.
+ *
+ * @param {Elevator} car the car to predict; it is not modified
+ * @param {{ floor: number, dir: Direction } | null} [extra=null] hall call to add to its plan
+ * @param {{ floor: number, dir: Direction } | null} [exclude=null] hall call to take out of its plan
+ * @param {Simulation | null} [sim=null] when given, also project how full the car will be
+ * @returns {Map<string, RouteStop>} keyed by `hallKey(dir, floor)` or `carKey(floor)`
+ */
+function simulateRoute(car, extra = null, exclude = null, sim = null) {
+  const cfg = car.cfg;
+  const H = cfg.floorHeight;
+  // Time spent at every stop: doors open, minimum dwell, doors close, plus one passenger
+  // getting through.
+  const stopTime = cfg.doorOpenTime + cfg.minDwell + cfg.doorCloseTime + cfg.transferTime;
+  const moving = car.state === CarState.MOVING;
+  const times = new Map();
+
+  // Load projection: how many riders get out at each floor, and how many people are
+  // waiting at a hall stop (0 everywhere when there is no `sim`, so no projection).
+  const riders = new Map();
+  for (const p of car.passengers) riders.set(p.dest, (riders.get(p.dest) ?? 0) + 1);
+  const waitingAt = (f, d) => (sim ? waitingCount(sim, f, d) : 0);
+  let known = car.load; // riders already aboard
+  let boarded = 0;      // expected to board during the current sweep
+
+  // Plan on a stripped copy so the real car is never touched, with `exclude` taken out
+  // and `extra` put in.
+  const g = car.planningCopy();
+  if (exclude) g.hallCalls[exclude.dir].delete(exclude.floor);
+  if (extra) {
+    // A stationary car that can already take this direction answers on the spot.
+    if (!moving && car.floor === extra.floor && (car.direction === extra.dir || car.direction === 0)) {
+      times.set(hallKey(extra.dir, extra.floor), { t: 0, floor: extra.floor, dir: extra.dir, full: car.isFull });
+    } else {
+      g.hallCalls[extra.dir].add(extra.floor);
+    }
+  }
+
+  // A car with its doors in motion has to finish the door cycle before it can leave.
+  let t = 0; // time until the car can leave its current floor
+  switch (car.state) {
+    case CarState.OPENING: t = (1 - car.door) * cfg.doorOpenTime + cfg.minDwell + cfg.doorCloseTime; break;
+    case CarState.OPEN: t = Math.max(car.dwell, car.transfer) + cfg.doorCloseTime; break;
+    case CarState.CLOSING: t = car.door * cfg.doorCloseTime; break;
+    default: break;
+  }
+
+  // A moving car plans from where it could still stop (its braking point), and a stop
+  // exactly there counts. A stopped car plans from its floor.
+  let from = moving ? car.commitFloor : car.floor;
+  let inclusive = moving;
+  let dir = car.direction;
+  let headStart = moving ? car.speed / (2 * cfg.acceleration) : 0; // already partly up to speed
+
+  // One stop per pass. The cap only guards against a plan that never ends; a real route
+  // finishes long before it.
+  for (let i = 0; i < 4 * cfg.floors + 8; i++) {
+    // No direction yet: head for the nearest thing to do, or stop planning if there is none.
+    if (dir === 0) {
+      const nearest = g.nearestRequest(from, inclusive ? null : Math.round(from));
+      if (nearest === null) break;
+      dir = Math.sign(nearest - from);
+    }
+    // The next floor the LOOK rules would stop at going this way.
+    const next = g.nextStop(dir, from, inclusive);
+    if (next === null) {
+      // Nothing more ahead: turn round if there is work behind, otherwise the route is done.
+      // People who boarded on this sweep are assumed to be out by now.
+      if (g.hasRequestsBeyond(from, -dir)) {
+        dir = -dir;
+        inclusive = false;
+        boarded = 0;
+        continue;
+      }
+      break;
+    }
+    // Drive there. A moving car's first leg is measured from where it actually is, less a
+    // head start for the speed it already has.
+    const legFrom = moving && i === 0 ? car.floatFloor : from;
+    t += Math.max(0, travelTime(Math.abs(next - legFrom) * H, cfg) - headStart);
+    headStart = 0;
+
+    // Put the copy at the stop and ask which direction it would leave in, counting only
+    // its own calls. A hall call here in that direction is answered by this stop.
+    g.pos = next * H;
+    g.direction = dir;
+    const served = g.chooseDirectionAt(next, NO_HALL_CALLS);
+    // A car call here: its riders get out.
+    if (g.carCalls.delete(next)) {
+      known -= riders.get(next) ?? 0;
+      times.set(carKey(next), { t, floor: next, dir: 0, full: false });
+    }
+    if (served !== 0 && served !== dir) boarded = 0; // turning round here
+    // A hall call here: record when it is answered and whether the car would arrive full.
+    // If there is room, the people waiting are expected to get in.
+    if (served !== 0 && g.hallCalls[served].delete(next)) {
+      const full = known + boarded >= cfg.capacity;
+      times.set(hallKey(served, next), { t, floor: next, dir: served, full });
+      if (!full) boarded += waitingAt(next, served);
+    }
+    // Door cycle, then carry on from here in the direction just served.
+    t += stopTime;
+    from = next;
+    inclusive = false;
+    if (served !== 0) dir = served;
+  }
+
+  // Anything left can only be at the floor the car ended on (a call behind its doors).
+  const here = Math.round(from);
+  for (const d of [1, -1]) {
+    if (g.hallCalls[d].has(here)) times.set(hallKey(d, here), { t, floor: here, dir: d, full: false });
+  }
+  return times;
+}
+
+/**
+ * How many people at floor `f` are waiting to go in direction `d`, counting at least one
+ * (a lit button means someone is there).
+ * @param {Simulation} sim
+ * @param {number} f floor index
+ * @param {Direction} d UP or DOWN
+ * @returns {number}
+ */
+function waitingCount(sim, f, d) {
+  let n = 0;
+  for (const p of sim.waiting[f]) if (p.dir === d) n++;
+  // Never 0: the call exists, so the plan should expect at least one person to board.
+  return Math.max(1, n);
+}
+
+/**
+ * Seconds until `car` would open its doors at call.floor for call.dir if it took the call.
+ * @param {Elevator} car
+ * @param {{ floor: number, dir: Direction }} call
+ * @returns {number} seconds, or Infinity if the route never reaches the call
+ */
+function estimateArrival(car, call) {
+  // Add the call to the car's plan and read off when it is answered. No `sim` is passed,
+  // so this is timing only, with no load projection.
+  return simulateRoute(car, call).get(hallKey(call.dir, call.floor))?.t ?? Infinity;
+}
+
+/**
+ * Dispatch strategies. Cost-based strategies return a number per car (lower wins)
+ * and may move an unanswered call to a better car later; `hysteresis` is how much
+ * better the new car must be, which stops calls bouncing between cars.
+ * @type {Readonly<Record<string, Strategy>>}
+ */
+const STRATEGIES = Object.freeze({
+  eta: {
+    id: 'eta',
+    label: 'ETA',
+    summary: 'Simulates each car’s remaining route, stop by stop, and gives the call to the one that gets there first.',
+    reassign: false,
+    hysteresis: 0,
+    /** Predicted seconds until this car opens for the call, plus a 90 s penalty if it is full. */
+    cost(sim, car, call) {
+      // A full car would pass the call by, so its estimate is too hopeful. With the penalty,
+      // any car that is not full and arrives less than 90 s later wins instead.
+      return estimateArrival(car, call) + (car.isFull ? 90 : 0);
+    },
+  },
+  nearest: {
+    id: 'nearest',
+    label: 'Nearest car',
+    summary: 'Textbook figure-of-suitability rule: prefers a car already heading toward the call in the same direction.',
+    reassign: true,
+    hysteresis: 1,
+    /**
+     * Minus the figure of suitability (FS), so the most suitable car has the lowest cost.
+     * With d = distance to the call in floors and n = floors - 1, FS is n + 2 - d for a
+     * car heading toward the call in the call's direction, n + 1 - d for an idle car or
+     * one heading toward it the other way, 1 for a car moving away, and 0 for a full car.
+     */
+    cost(sim, car, call) {
+      // n is the largest possible distance, so n + 1 - d is never below 1, the score of a
+      // car moving away.
+      const n = car.cfg.floors - 1;
+      const d = Math.abs(car.floatFloor - call.floor);
+      let fs;
+      // Full: least suitable of all.
+      if (car.isFull) fs = 0;
+      // Idle: the closer, the better.
+      else if (car.direction === 0) fs = n + 1 - d;
+      // Heading toward the call: one point more if it is also going the call's way.
+      else if (car.direction * (call.floor - car.floatFloor) > 0) fs = car.direction === call.dir ? n + 2 - d : n + 1 - d;
+      // Moving away: only better than a full car.
+      else fs = 1;
+      // Lower cost wins, so the most suitable car gets the most negative number.
+      return -fs;
+    },
+  },
+  roundRobin: {
+    id: 'roundRobin',
+    label: 'Round robin',
+    summary: 'Hands calls to the cars in turn, ignoring where they are. A baseline to beat.',
+    reassign: false,
+    hysteresis: 0,
+    /** The next car in turn, whatever its position or load. */
+    choose(sim) {
+      // The counter only grows; taking it modulo the number of cars cycles A, B, C, A, …
+      return { car: sim.cars[sim.roundRobinNext++ % sim.cars.length], cost: 0 };
+    },
+  },
+});
+
+/**
+ * Best car for a call. Ties go to the lower car id.
+ * @param {Strategy} strategy
+ * @param {Simulation} sim
+ * @param {HallCall} call
+ * @returns {Choice}
+ */
+function chooseCar(strategy, sim, call) {
+  // Strategies that pick a car directly (round robin) don't price anything.
+  if (strategy.choose) return strategy.choose(sim, call);
+  // Price every car. Only a strictly lower cost replaces the best so far, so on a tie the
+  // earlier car (lower id) keeps the call. The first car is always taken, even at Infinity.
+  let best = { car: null, cost: Infinity };
+  for (const car of sim.cars) {
+    const cost = strategy.cost(sim, car, call);
+    if (best.car === null || cost < best.cost) best = { car, cost };
+  }
+  return best;
+}
+
+// ---- src/rng.js
+/**
+ * Small seeded PRNG (mulberry32). Deterministic traffic lets different dispatch
+ * strategies be compared on exactly the same stream of passengers.
+ * @param {number} seed any number; the same seed always gives the same sequence
+ * @returns {() => number} call it for the next value, uniform in [0, 1)
+ */
+function createRng(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---- src/traffic.js
+
+/**
+ * A passenger arrival pattern.
+ * @typedef {object} Pattern
+ * @property {string} id key in `PATTERNS`
+ * @property {string} label name shown on the page
+ * @property {number | null} fromLobby share of trips that start at the lobby, 0 to 1; null for interfloor
+ * @property {number | null} toLobby share of trips that end at the lobby, 0 to 1; null for interfloor
+ */
+
+/**
+ * One new passenger.
+ * @typedef {object} Arrival
+ * @property {number} time when they arrive, s
+ * @property {number} origin floor index
+ * @property {number} dest floor index, never equal to origin
+ */
+
+/**
+ * Options for `new TrafficGenerator(...)`.
+ * @typedef {object} TrafficOptions
+ * @property {string} [pattern='uppeak'] key of `PATTERNS`; unknown keys fall back to up-peak
+ * @property {number} [rate=20] passengers per minute; 0 for no arrivals
+ * @property {number} [seed=1] seed for the random stream
+ * @property {number} floors number of floors in the building
+ */
+
+/**
+ * Passenger arrival patterns. `fromLobby` / `toLobby` are the shares of trips that
+ * start or end at the lobby; the rest travel between upper floors.
+ * @type {Readonly<Record<string, Pattern>>}
+ */
+const PATTERNS = Object.freeze({
+  uppeak: { id: 'uppeak', label: 'Morning up-peak', fromLobby: 0.85, toLobby: 0.05 },
+  downpeak: { id: 'downpeak', label: 'Evening down-peak', fromLobby: 0.05, toLobby: 0.85 },
+  lunch: { id: 'lunch', label: 'Lunch two-way', fromLobby: 0.4, toLobby: 0.4 },
+  interfloor: { id: 'interfloor', label: 'Interfloor', fromLobby: null, toLobby: null },
+});
+
+/**
+ * Poisson arrivals at `rate` passengers per minute, origins and destinations drawn
+ * from the pattern. Consumes its own seeded RNG and nothing else, so the arrival
+ * stream is identical whatever the cars do.
+ */
+class TrafficGenerator {
+  /**
+   * @param {TrafficOptions} options
+   */
+  constructor({ pattern = 'uppeak', rate = 20, seed = 1, floors }) {
+    this.rng = createRng(seed);
+    this.floors = floors;
+    /** @type {Pattern} */
+    this.pattern = PATTERNS[pattern] ?? PATTERNS.uppeak;
+    this.rate = rate;
+    // s; arrivals up to this time have already been handed out
+    this.clock = 0;
+    this.nextTime = this.rate > 0 ? this.sampleGap() : Infinity;
+  }
+
+  /**
+   * Change the arrival rate from now on.
+   * @param {number} rate passengers per minute; 0 stops new arrivals
+   */
+  setRate(rate) {
+    this.rate = rate;
+    this.nextTime = rate > 0 ? this.clock + this.sampleGap() : Infinity;
+  }
+
+  /**
+   * Change the pattern for arrivals from now on. Unknown ids are ignored.
+   * @param {string} id key of `PATTERNS`
+   */
+  setPattern(id) {
+    this.pattern = PATTERNS[id] ?? this.pattern;
+  }
+
+  /**
+   * Arrivals with time <= t, in order.
+   * @param {number} t simulated time, s
+   * @returns {Arrival[]} everyone arriving since the previous call, up to `t`
+   */
+  arrivalsUntil(t) {
+    const out = [];
+    while (this.nextTime <= t) {
+      out.push({ time: this.nextTime, ...this.sampleTrip() });
+      this.nextTime += this.sampleGap();
+    }
+    this.clock = t;
+    return out;
+  }
+
+  /**
+   * Seconds until the next arrival, drawn from an exponential distribution (which makes
+   * arrivals a Poisson process).
+   * @returns {number}
+   */
+  sampleGap() {
+    return (-Math.log(1 - this.rng()) * 60) / this.rate;
+  }
+
+  /**
+   * Origin and destination for one passenger, following the current pattern.
+   * @returns {{ origin: number, dest: number }} floor indices, never equal
+   */
+  sampleTrip() {
+    const n = this.floors;
+    const rng = this.rng;
+    const anyFloor = () => Math.floor(rng() * n);
+    const upperFloor = () => 1 + Math.floor(rng() * (n - 1));
+    const p = this.pattern;
+    if (p.fromLobby === null) {
+      const origin = anyFloor();
+      let dest = anyFloor();
+      while (dest === origin) dest = anyFloor();
+      return { origin, dest };
+    }
+    const r = rng();
+    if (r < p.fromLobby) return { origin: 0, dest: upperFloor() };
+    if (r < p.fromLobby + p.toLobby) return { origin: upperFloor(), dest: 0 };
+    const origin = upperFloor();
+    let dest = upperFloor();
+    while (dest === origin) dest = upperFloor();
+    return { origin, dest };
+  }
+}
+
+// ---- src/simulation.js
+
+
+
+
+/** @typedef {import('./constants.js').Direction} Direction */
+/** @typedef {import('./constants.js').Config} Config */
+/** @typedef {import('./elevator.js').Env} Env */
+/** @typedef {import('./dispatch.js').Strategy} Strategy */
+/** @typedef {import('./traffic.js').TrafficOptions} TrafficOptions */
+
+/**
+ * One person using the elevators. Times are simulated seconds since the start of the run.
+ * @typedef {object} Passenger
+ * @property {number} id 1, 2, 3, … in order of arrival
+ * @property {number} origin floor index where they wait
+ * @property {number} dest floor index they want to reach
+ * @property {Direction} dir UP or DOWN, from origin to dest
+ * @property {number} spawnTime when they arrived and pressed the hall button
+ * @property {number | null} boardTime when they stepped into a car; null while waiting
+ * @property {number | null} arriveTime when they stepped out at `dest`; null until then
+ * @property {number | null} carId id of the car they boarded; null while waiting
+ */
+
+/**
+ * A lit hall button: someone at `floor` wants to go `dir`, and one car is assigned to it.
+ * @typedef {object} HallCall
+ * @property {number} floor floor index
+ * @property {Direction} dir UP or DOWN
+ * @property {number} since when the button was lit, s
+ * @property {number | null} carId id of the assigned car
+ * @property {number} cost the strategy's cost for the assigned car (for ETA, predicted seconds)
+ */
+
+/**
+ * One line of the controller log shown on the page.
+ * @typedef {object} LogEvent
+ * @property {number} t when it happened, s
+ * @property {'assign' | 'reassign' | 'serve' | 'park'} kind
+ * @property {string} text
+ */
+
+/**
+ * Service figures returned by `stats()`. Averages and percentiles cover delivered
+ * passengers only; times are in seconds.
+ * @typedef {object} Stats
+ * @property {number} time simulated time now
+ * @property {number} spawned passengers who have arrived so far
+ * @property {number} delivered passengers who have reached their floor
+ * @property {number} waitingNow passengers waiting at a floor right now
+ * @property {number} ridingNow passengers inside a car right now
+ * @property {number} avgWait mean wait
+ * @property {number} p95Wait 95th percentile wait
+ * @property {number} maxWait longest wait
+ * @property {number} longWaitShare share of waits over 60 s, from 0 to 1
+ * @property {number} avgRide mean ride
+ * @property {number} avgTrip mean trip
+ * @property {number} p95Trip 95th percentile trip
+ * @property {number} longestWaitNow how long the longest-waiting person still waiting has waited so far
+ * @property {number} distance metres travelled by all cars together
+ * @property {number} stops door cycles of all cars together
+ */
+
+/**
+ * Options for `new Simulation(...)`. Every field is optional.
+ * @typedef {object} SimulationOptions
+ * @property {Partial<Config>} [config] overrides for `DEFAULT_CONFIG`
+ * @property {string} [strategy='eta'] key of `STRATEGIES`
+ * @property {Omit<TrafficOptions, 'floors'>} [traffic] arrival pattern, rate and seed
+ * @property {number} [dt=0.05] fixed time step, s
+ * @property {boolean} [log=true] keep a controller log in `events` (the bench turns it off for speed)
+ */
+
+/** How many recent controller log entries `events` keeps. */
+const MAX_EVENTS = 200;
+
+/**
+ * Value at quantile `q` of an ascending array (nearest-rank method).
+ * @param {number[]} sorted values in ascending order
+ * @param {number} q from 0 to 1, e.g. 0.95
+ * @returns {number} 0 for an empty array
+ */
+function quantile(sorted, q) {
+  if (sorted.length === 0) return 0;
+  // Nearest rank: the smallest value with at least a share q of the values at or below
+  // it. The index is clamped so q = 0 and q = 1 stay inside the array.
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1));
+  return sorted[i];
+}
+
+/**
+ * Arithmetic mean.
+ * @param {number[]} xs
+ * @returns {number} 0 for an empty array
+ */
+function mean(xs) {
+  return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
+}
+
+/**
+ * A building with a group of cars, the people waiting for them, and the group
+ * controller that registers hall calls and hands them to cars.
+ *
+ * Fixed-step and deterministic: the same options and seed always produce the same run.
+ */
+class Simulation {
+  /**
+   * @param {SimulationOptions} [options]
+   */
+  constructor({ config = {}, strategy = 'eta', traffic = {}, dt = 0.05, log = true } = {}) {
+    // Settings: the defaults with any overrides on top. Every car shares this same object.
+    /** @type {Config} */
+    this.cfg = { ...DEFAULT_CONFIG, ...config };
+    if (this.cfg.floors < 3) throw new RangeError('A building needs at least 3 floors');
+    /** @type {number} length of one step, s */
+    this.dt = dt;
+    /** @type {number} simulated time, s */
+    this.time = 0;
+    /** @type {boolean} whether to keep the controller log in `events` */
+    this.logging = log;
+    this.setStrategy(strategy);
+    /** @type {TrafficGenerator} where new passengers come from */
+    this.traffic = new TrafficGenerator({ floors: this.cfg.floors, ...traffic });
+
+    // Every car starts at the lobby, empty and idle.
+    /** @type {Elevator[]} indexed by car id */
+    this.cars = Array.from({ length: this.cfg.cars }, (_, i) => new Elevator(i, this.cfg, 0));
+    /** @type {Passenger[][]} people waiting at each floor, oldest first: `waiting[floor]` */
+    this.waiting = Array.from({ length: this.cfg.floors }, () => []);
+    /** @type {Record<number, HallCall | null>[]} the building's hall buttons: `hallCalls[floor][dir]`, null when unlit */
+    this.hallCalls = Array.from({ length: this.cfg.floors }, () => ({ [UP]: null, [DOWN]: null }));
+    /** @type {Passenger[]} everyone who has reached their floor, in order of arrival */
+    this.delivered = [];
+    /** @type {number} passengers who have arrived so far */
+    this.spawned = 0;
+    /** @type {number} id for the next passenger */
+    this.nextPassengerId = 1;
+    /** @type {number} round-robin counter; the next call goes to car `roundRobinNext % cars.length` */
+    this.roundRobinNext = 0;
+    /** @type {number} time of the last `redispatch`, s */
+    this.lastRedispatch = 0;
+    /** @type {LogEvent[]} the controller log, newest last */
+    this.events = [];
+
+    // Hooks the cars call back into. See Elevator for the contract.
+    /** @type {Env} */
+    this.env = {
+      // Lit means the button is on and the call is assigned to some car, not necessarily this one.
+      hallCall: (f, d) => this.hallCalls[f][d] !== null,
+      onServe: (car, f, d) => this.serveCall(car, f, d),
+      transferOne: (car, f) => this.transferOne(car, f),
+      // Reopen for someone waiting here who could board: there is room, and they are going
+      // the car's way (or the car has no direction yet).
+      wantsReopen: (car, f) => !car.isFull && this.waiting[f].some((p) => car.direction === 0 || p.dir === car.direction),
+    };
+  }
+
+  /**
+   * Switch the dispatch strategy. Calls already assigned stay where they are.
+   * @param {string} id key of `STRATEGIES`: 'eta', 'nearest' or 'roundRobin'
+   * @throws {RangeError} for an unknown id
+   */
+  setStrategy(id) {
+    const s = STRATEGIES[id];
+    if (!s) throw new RangeError(`Unknown strategy "${id}"`);
+    /** @type {Strategy} */
+    this.strategy = s;
+  }
+
+  // ---------------------------------------------------------------- main loop
+
+  /**
+   * Advance one fixed time step: add new arrivals, light or clear hall buttons,
+   * re-evaluate calls once every `redispatchInterval` (and maybe send an idle car to
+   * the lobby), then move every car.
+   * @param {number} [dt=this.dt] seconds
+   */
+  step(dt = this.dt) {
+    // 1. Everyone who arrives during this step joins the queue at their floor.
+    for (const a of this.traffic.arrivalsUntil(this.time + dt)) this.spawn(a.origin, a.dest, a.time);
+    // 2. Light buttons for new arrivals, clear buttons nobody is waiting at any more.
+    this.syncHallCalls();
+    // 3. Once a second (by default), reconsider unanswered calls and idle cars.
+    if (this.time - this.lastRedispatch >= this.cfg.redispatchInterval) {
+      this.redispatch();
+      this.parkIdleCars();
+      this.lastRedispatch = this.time;
+    }
+    // 4. Move every car: motion, doors and passengers.
+    for (const car of this.cars) car.step(dt, this.env);
+    this.time += dt;
+  }
+
+  /**
+   * Advance by `seconds` of simulated time.
+   * @param {number} seconds
+   */
+  advance(seconds) {
+    // The tiny margin stops floating-point rounding in `time` from adding one extra step.
+    const end = this.time + seconds - 1e-9;
+    while (this.time < end) this.step();
+  }
+
+  // ---------------------------------------------------------------- passengers
+
+  /**
+   * Add a passenger waiting at `origin` to go to `dest`. Their hall button lights on the next step.
+   * @param {number} origin floor index
+   * @param {number} dest floor index, different from `origin`
+   * @param {number} [time=this.time] when they arrived, s
+   * @returns {Passenger}
+   * @throws {RangeError} when either floor is out of range or they are the same
+   */
+  spawn(origin, dest, time = this.time) {
+    const n = this.cfg.floors;
+    // Both floors must be whole floor indices inside the building, and different.
+    if (!Number.isInteger(origin) || !Number.isInteger(dest) || origin < 0 || dest < 0 || origin >= n || dest >= n || origin === dest) {
+      throw new RangeError(`Invalid trip ${origin} → ${dest}`);
+    }
+    // Their direction follows from the trip; the three times are filled in as it happens.
+    const p = {
+      id: this.nextPassengerId++,
+      origin,
+      dest,
+      dir: dest > origin ? UP : DOWN,
+      spawnTime: time,
+      boardTime: null,
+      arriveTime: null,
+      carId: null,
+    };
+    // Join the back of the queue at their floor.
+    this.waiting[origin].push(p);
+    this.spawned++;
+    return p;
+  }
+
+  /**
+   * One passenger leaves or boards. Alighting goes first; boarding is first come, first served.
+   * Only people going the car's way board, or anyone if the car has no direction yet.
+   * Called by the car (through `env`) while its doors are open.
+   *
+   * HINT, complaint 2 (overload with two aboard): the fix belongs in this function.
+   * @param {Elevator} car
+   * @param {number} f floor index the car is open at
+   * @returns {boolean} true if someone moved; false when nobody is left to move
+   */
+  transferOne(car, f) {
+    // Getting out: the first rider whose destination is this floor.
+    const out = car.passengers.findIndex((p) => p.dest === f);
+    if (out >= 0) {
+      // They leave the car and count as delivered.
+      const [p] = car.passengers.splice(out, 1);
+      p.arriveTime = this.time;
+      this.delivered.push(p);
+      return true;
+    }
+    // Getting in: nobody else boards a full car.
+    if (car.isFull) return false;
+    // The longest-waiting person here going the car's way (anyone, if it has no direction).
+    const queue = this.waiting[f];
+    const i = queue.findIndex((p) => car.direction === 0 || p.dir === car.direction);
+    if (i < 0) return false;
+    // They leave the queue and step in.
+    const [p] = queue.splice(i, 1);
+    p.boardTime = this.time;
+    p.carId = car.id;
+    car.passengers.push(p);
+    // The car's load reading goes up by one person.
+    car.loadKg += KG_PER_PERSON;
+    // They press their floor's button inside the car.
+    car.carCalls.add(p.dest);
+    if (car.direction === 0) {
+      // A car that opened with no direction takes the first passenger's.
+      car.direction = p.dir;
+      car.hallCalls[p.dir].delete(f);
+      this.serveCall(car, f, p.dir);
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------- hall calls
+
+  /** Light hall buttons for anyone waiting without one; clear buttons nobody is waiting at. */
+  syncHallCalls() {
+    for (let f = 0; f < this.cfg.floors; f++) {
+      for (const d of [UP, DOWN]) {
+        const call = this.hallCalls[f][d];
+        const waiting = this.waiting[f].some((p) => p.dir === d);
+        // Lit, but nobody here is going that way any more: turn it off.
+        if (call && !waiting) this.dropCall(call);
+        // Someone is waiting with the button off, and no car is already open here for
+        // them: light it, which also assigns it to a car.
+        else if (!call && waiting && !this.isBeingServed(f, d)) this.registerCall(f, d);
+      }
+    }
+  }
+
+  /**
+   * Is a car already open at floor `f` that someone going `d` can board? If so, there is
+   * no need to light the button.
+   * @param {number} f floor index
+   * @param {Direction} d UP or DOWN
+   * @returns {boolean}
+   */
+  isBeingServed(f, d) {
+    // Doors opening or open at f, going d or with no direction yet, and not full.
+    return this.cars.some((c) =>
+      (c.state === CarState.OPENING || c.state === CarState.OPEN) &&
+      c.floor === f && (c.direction === d || c.direction === 0) && !c.isFull);
+  }
+
+  /**
+   * Light the hall button for `d` at `f` and let the active strategy assign it to a car.
+   * @param {number} f floor index
+   * @param {Direction} d UP or DOWN
+   */
+  registerCall(f, d) {
+    const call = { floor: f, dir: d, since: this.time, carId: null, cost: 0 };
+    this.hallCalls[f][d] = call;
+    // The strategy picks the car; `assign` records the choice on the call and on the car.
+    const { car, cost } = chooseCar(this.strategy, this, call);
+    this.assign(call, car, cost);
+    if (this.logging) this.log('assign', `${dirArrow(d)} ${floorLabel(f)} → car ${car.name}${this.etaNote(car, call)}`);
+  }
+
+  /**
+   * Give `call` to `car`, taking it off the car that had it before. Keeps the building's
+   * record (`hallCalls`) and the cars' own lists (`car.hallCalls`) in step.
+   * @param {HallCall} call
+   * @param {Elevator} car
+   * @param {number} cost the strategy's cost for this car
+   */
+  assign(call, car, cost) {
+    // Off the previous car's list, if it had one, then onto the new car's.
+    if (call.carId !== null) this.cars[call.carId].hallCalls[call.dir].delete(call.floor);
+    call.carId = car.id;
+    call.cost = cost;
+    car.hallCalls[call.dir].add(call.floor);
+  }
+
+  /**
+   * Turn a hall button off and take the call off its car's list.
+   * @param {HallCall} call
+   */
+  dropCall(call) {
+    // Off the car's list first, then off the building's.
+    if (call.carId !== null) this.cars[call.carId].hallCalls[call.dir].delete(call.floor);
+    this.hallCalls[call.floor][call.dir] = null;
+  }
+
+  /**
+   * A car is opening at f for direction d: that hall call is answered, whoever it was assigned to.
+   * @param {Elevator} car the car that is opening
+   * @param {number} f floor index
+   * @param {Direction} d UP or DOWN
+   */
+  serveCall(car, f, d) {
+    const call = this.hallCalls[f][d];
+    // The button isn't lit (nobody pressed it, or it was already answered): nothing to do.
+    if (!call) return;
+    this.dropCall(call);
+    // Worth a log line only when a car answers a call that was assigned to another car.
+    if (call.carId !== car.id) this.log('serve', `Car ${car.name} answers ${dirArrow(d)} ${floorLabel(f)} on the way`);
+  }
+
+  /**
+   * Re-evaluate every unanswered call; move it if another car is now clearly better.
+   * Only for strategies with `reassign` (Nearest car); ETA and round robin never move a call.
+   */
+  redispatch() {
+    const s = this.strategy;
+    for (let f = 0; f < this.cfg.floors; f++) {
+      for (const d of [UP, DOWN]) {
+        const call = this.hallCalls[f][d];
+        // Skip unlit buttons, and every call when the strategy never reassigns.
+        if (!call || !s.reassign) continue;
+        // What keeping the call costs now, against the best car now.
+        const current = this.cars[call.carId];
+        const currentCost = s.cost(this, current, call);
+        const best = chooseCar(s, this, call);
+        call.cost = currentCost;
+        // Move it if its car is full, or another car beats it by more than the hysteresis
+        // margin (the margin stops calls bouncing between two cars with similar costs).
+        if (best.car !== current && (current.isFull || best.cost < currentCost - s.hysteresis)) {
+          this.assign(call, best.car, best.cost);
+          if (this.logging) this.log('reassign', `${dirArrow(d)} ${floorLabel(f)} moved ${current.name} → ${best.car.name}${this.etaNote(best.car, call)}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Send one empty, idle car back to the lobby so the next arrivals find it there.
+   * Does nothing if parking is off (`parkIdleAfter` is 0) or a car is at or heading to the lobby.
+   */
+  parkIdleCars() {
+    if (!(this.cfg.parkIdleAfter > 0)) return;
+    // The lobby is covered if a car is stopped there, is driving there, has it as a car
+    // call, or holds the lobby's Up call.
+    const covered = this.cars.some((c) =>
+      (c.floor === 0 && c.state !== CarState.MOVING) || c.target === 0 || c.carCalls.has(0) || c.hallCalls[UP].has(0));
+    if (covered) return;
+    // Empty cars that have been idle long enough, the lowest (closest to the lobby) first.
+    const candidates = this.cars
+      .filter((c) => c.state === CarState.IDLE && c.load === 0 && c.idleTime >= this.cfg.parkIdleAfter)
+      .sort((a, b) => a.floatFloor - b.floatFloor);
+    if (candidates.length === 0) return;
+    // A car call for the lobby sends it down like any other trip.
+    candidates[0].carCalls.add(0);
+    this.log('park', `Car ${candidates[0].name} returns to the lobby`);
+  }
+
+  // ---------------------------------------------------------------- reporting
+
+  /**
+   * Log suffix with the car's predicted arrival.
+   * @param {Elevator} car
+   * @param {HallCall} call
+   * @returns {string} e.g. ', ETA 12 s', or '' when there is no estimate
+   */
+  etaNote(car, call) {
+    if (!car) return '';
+    // Infinity means the car's planned route never reaches the call.
+    const eta = estimateArrival(car, call);
+    return Number.isFinite(eta) ? `, ETA ${eta.toFixed(0)} s` : '';
+  }
+
+  /**
+   * Add a line to the controller log (when logging is on), keeping the latest `MAX_EVENTS`.
+   * @param {LogEvent['kind']} kind
+   * @param {string} text
+   */
+  log(kind, text) {
+    if (!this.logging) return;
+    this.events.push({ t: this.time, kind, text });
+    // Drop the oldest entry once the log is over its limit.
+    if (this.events.length > MAX_EVENTS) this.events.shift();
+  }
+
+  /** @returns {number} people waiting at all floors */
+  waitingCount() {
+    return this.waiting.reduce((s, q) => s + q.length, 0);
+  }
+
+  /** @returns {number} people inside all cars */
+  ridingCount() {
+    return this.cars.reduce((s, c) => s + c.load, 0);
+  }
+
+  /**
+   * Service figures so far. The page shows them in "Service since reset", and the bench prints them.
+   *
+   * HINT, complaint 3 (average wait equals average trip): the fix belongs in this function.
+   * @returns {Stats}
+   */
+  stats() {
+    const d = this.delivered;
+    // One duration per delivered passenger. Waits and trips are sorted for the percentiles.
+    const waits = d.map((p) => p.arriveTime - p.spawnTime).sort((a, b) => a - b);
+    const rides = d.map((p) => p.arriveTime - p.boardTime);
+    const trips = d.map((p) => p.arriveTime - p.spawnTime).sort((a, b) => a - b);
+    // People still standing at a floor, timed from when they arrived until now.
+    let longestWaitNow = 0;
+    for (const q of this.waiting) for (const p of q) longestWaitNow = Math.max(longestWaitNow, this.time - p.spawnTime);
+    return {
+      time: this.time,
+      spawned: this.spawned,
+      delivered: d.length,
+      waitingNow: this.waitingCount(),
+      ridingNow: this.ridingCount(),
+      avgWait: mean(waits),
+      p95Wait: quantile(waits, 0.95),
+      maxWait: waits.length ? waits[waits.length - 1] : 0,
+      longWaitShare: waits.length ? waits.filter((w) => w > 60).length / waits.length : 0,
+      avgRide: mean(rides),
+      avgTrip: mean(trips),
+      p95Trip: quantile(trips, 0.95),
+      longestWaitNow,
+      // Totals over all cars.
+      distance: this.cars.reduce((s, c) => s + c.distance, 0),
+      stops: this.cars.reduce((s, c) => s + c.stops, 0),
+    };
+  }
+}
+
+/**
+ * Options for `runScenario`. Every field is optional.
+ * @typedef {object} ScenarioOptions
+ * @property {string} [strategy='eta'] key of `STRATEGIES`
+ * @property {string} [pattern='uppeak'] key of `PATTERNS`
+ * @property {number} [rate=20] arrivals per minute
+ * @property {number} [seed=1] traffic seed
+ * @property {number} [minutes=30] how long new passengers keep arriving
+ * @property {number} [drainMinutes=30] extra time allowed for everyone to be delivered
+ * @property {Partial<Config>} [config] overrides for `DEFAULT_CONFIG`
+ */
+
+/**
+ * Headless run: arrivals for `minutes`, then no new arrivals until everyone has been
+ * delivered (or `drainMinutes` pass), so slow strategies cannot hide stranded passengers.
+ * @param {ScenarioOptions} [options]
+ * @returns {Stats & { strategy: string, drained: boolean }} `drained` is false if anyone was still waiting or riding at the end
+ */
+function runScenario({ strategy = 'eta', pattern = 'uppeak', rate = 20, seed = 1, minutes = 30, drainMinutes = 30, config = {} } = {}) {
+  const sim = new Simulation({ strategy, config, traffic: { pattern, rate, seed }, log: false });
+  // Busy period: passengers keep arriving.
+  sim.advance(minutes * 60);
+  // Drain: no new arrivals; stop as soon as everyone is delivered, or at the time limit.
+  sim.traffic.setRate(0);
+  const limit = sim.time + drainMinutes * 60;
+  while ((sim.waitingCount() > 0 || sim.ridingCount() > 0) && sim.time < limit) sim.step();
+  return { strategy, ...sim.stats(), drained: sim.waitingCount() + sim.ridingCount() === 0 };
+}
+
+// ---- web/app.js
+
+
+
+
+/**
+ * What the controls are set to. A reset or a scene builds a new simulation from these.
+ * @typedef {object} Settings
+ * @property {string} strategy key of `STRATEGIES`
+ * @property {string} pattern key of `PATTERNS`
+ * @property {number} rate arrivals per minute; 0 means manual only
+ * @property {number} floors
+ * @property {number} seed traffic seed
+ * @property {boolean} park return an idle car to the lobby
+ * @property {number} speed simulated seconds per real second: 1, 3, 10 or 30
+ */
+
+/**
+ * A staged tenant complaint, one button in the Tenant complaints panel.
+ * @typedef {object} Scene
+ * @property {string} label button title
+ * @property {string} summary what happens in the scene, shown under the title
+ * @property {(s: Simulation) => void} setup stages the scene in a freshly reset simulation
+ */
+
+/**
+ * DOM elements for one car in the shafts, plus what was last drawn, so unchanged parts
+ * are not redrawn every frame.
+ * @typedef {object} CarView
+ * @property {HTMLElement} ind indicator above the shaft (car letter, arrow, floor)
+ * @property {HTMLElement} arrow
+ * @property {HTMLElement} num
+ * @property {HTMLElement} el the car itself
+ * @property {HTMLElement} riders one dot per passenger
+ * @property {HTMLElement} doorL
+ * @property {HTMLElement} doorR
+ * @property {HTMLElement} loadbar
+ * @property {HTMLElement} lantern direction arrow inside the car
+ * @property {number} load last drawn
+ * @property {number | null} dir last drawn
+ * @property {string} floorText last drawn
+ * @property {boolean} overload last drawn
+ */
+
+/**
+ * DOM elements for one floor row.
+ * @typedef {object} FloorView
+ * @property {Record<number, { el: HTMLElement, tag: HTMLElement, lit: boolean, name: string }>} buttons hall buttons by direction; `tag` shows the assigned car's letter
+ * @property {HTMLElement} waiting the ▲▼ marks for people waiting
+ * @property {string} sig summary of the last drawn queue, to skip redraws
+ */
+
+/**
+ * DOM elements for one row of the cars panel.
+ * @typedef {object} RowView
+ * @property {HTMLElement} row
+ * @property {HTMLElement} pos
+ * @property {HTMLElement} state
+ * @property {HTMLElement} meter
+ * @property {HTMLElement} loadText
+ */
+
+/**
+ * Everything drawn for the current simulation; rebuilt on every reset.
+ * @typedef {object} View
+ * @property {number} rowH height of one floor row, px
+ * @property {FloorView[]} floors by floor index
+ * @property {CarView[]} cars by car id
+ * @property {RowView[]} [rows] by car id
+ */
+
+/**
+ * @param {string} id
+ * @returns {HTMLElement} the element with that id (the page always has it)
+ */
+const byId = (id) => document.getElementById(id);
+/** @type {Settings} */
+const settings = { strategy: 'eta', pattern: 'uppeak', rate: 12, floors: 12, seed: 7, park: true, speed: 3 };
+/**
+ * Status text for each car state. A moving car shows its speed instead.
+ * @type {Record<string, string>}
+ */
+const STATE_TEXT = {
+  [CarState.IDLE]: 'Idle',
+  [CarState.OPENING]: 'Doors opening',
+  [CarState.OPEN]: 'Doors open',
+  [CarState.CLOSING]: 'Doors closing',
+};
+
+/**
+ * Tenant complaints, each staged as a short scene in a fresh building with no background traffic.
+ * @type {Scene[]}
+ */
+const SCENES = [
+  {
+    label: '1 · Floor 7 doors',
+    summary: 'Car A waits at 7. Two people arrive there: one going to 10, one going to 2.',
+    setup(s) {
+      // Car A starts at floor index 6 (labelled 7); B and C stay at the lobby.
+      s.cars[0].pos = 6 * s.cfg.floorHeight;
+      s.spawn(6, 9);
+      s.spawn(6, 1);
+    },
+  },
+  {
+    label: '2 · Overload with two aboard',
+    summary: 'Car A waits at 5, B and C at 12. Twelve people at 5 go down to L, where two people are waiting to go up.',
+    setup(s) {
+      // Car A starts at floor index 4 (labelled 5); B and C start at the top, index 11.
+      s.cars[0].pos = 4 * s.cfg.floorHeight;
+      s.cars[1].pos = 11 * s.cfg.floorHeight;
+      s.cars[2].pos = 11 * s.cfg.floorHeight;
+      for (let i = 0; i < 12; i++) s.spawn(4, 0);
+      s.spawn(0, 7);
+      s.spawn(0, 9);
+    },
+  },
+  {
+    label: '3 · Wait equals trip',
+    summary: 'One person rides from L to 12. A car is already waiting at L.',
+    setup(s) {
+      s.spawn(0, 11);
+    },
+  },
+];
+
+/** @type {Simulation} the simulation on screen; replaced on every reset */
+let sim;
+/** @type {View} */
+let view;
+/** Whether the simulation clock is running (false while paused). */
+let running = true;
+
+/**
+ * Create an element.
+ * @param {string} tag e.g. 'div'
+ * @param {string} [className]
+ * @param {string} [html] inner HTML
+ * @returns {HTMLElement}
+ */
+function makeEl(tag, className, html) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (html !== undefined) el.innerHTML = html;
+  return el;
+}
+
+/**
+ * @param {number} t seconds
+ * @returns {string} 'hh:mm:ss'
+ */
+function formatClock(t) {
+  const s = Math.floor(t);
+  return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((v) => String(v).padStart(2, '0')).join(':');
+}
+
+/**
+ * Seconds with one decimal, as HTML for a stats tile.
+ * @param {number} v seconds
+ * @returns {string}
+ */
+function secs(v) {
+  return `${v.toFixed(1)}<small>s</small>`;
+}
+
+// ------------------------------------------------------------------ setup
+
+/** Build a fresh simulation from `settings`, then rebuild everything drawn for it. */
+function newSimulation() {
+  sim = new Simulation({
+    strategy: settings.strategy,
+    config: { floors: settings.floors, parkIdleAfter: settings.park ? DEFAULT_CONFIG.parkIdleAfter : 0 },
+    traffic: { pattern: settings.pattern, rate: settings.rate, seed: settings.seed },
+  });
+  sim.advance(120); // warm up so the first frame shows a building already in service
+  buildBuilding();
+  buildCarRows();
+  fillTripSelects();
+  byId('subtitle').textContent = `${sim.cars.length} cars · ${sim.cfg.floors} floors · ${sim.cfg.maxSpeed} m/s · group control`;
+  renderSlow();
+}
+
+/**
+ * Reset into a staged complaint: a fresh 12-floor building with ETA dispatch and no
+ * background traffic, then the scene's own setup. Un-pauses if needed.
+ * @param {Scene} scene
+ */
+function playScene(scene) {
+  Object.assign(settings, { strategy: 'eta', rate: 0, floors: 12 });
+  syncStrategyButtons();
+  syncRate();
+  byId('floors').value = String(settings.floors);
+  newSimulation();
+  scene.setup(sim);
+  setRunning(true);
+  renderFrame();
+  renderSlow();
+}
+
+/**
+ * Draw the building for the current simulation: floor labels, hall buttons and waiting
+ * marks on the left, one shaft per car with its indicator above. Fills `view`.
+ */
+function buildBuilding() {
+  const n = sim.cfg.floors;
+  const el = byId('building');
+  el.innerHTML = '';
+  const rowH = Math.max(26, Math.min(44, Math.floor(520 / n)));
+  el.style.setProperty('--row-h', `${rowH}px`);
+  el.style.setProperty('--cars', sim.cars.length);
+  el.style.gridTemplateRows = `auto repeat(${n}, ${rowH}px)`;
+  view = { rowH, floors: [], cars: [] };
+
+  sim.cars.forEach((car, i) => {
+    const ind = makeEl('div', 'indicator', `<span class="letter">${car.name}</span><span class="arrow"></span><span class="num"></span>`);
+    ind.style.gridColumn = String(4 + i);
+    el.append(ind);
+    view.cars[i] = { ind, arrow: ind.querySelector('.arrow'), num: ind.querySelector('.num') };
+  });
+
+  for (let f = n - 1; f >= 0; f--) {
+    const row = String(n - f + 1);
+    const label = makeEl('div', `floor-label${f === 0 ? ' lobby' : ''}`, floorLabel(f));
+    const hall = makeEl('div', 'hall');
+    const waiting = makeEl('div', 'waiting');
+    for (const cell of [label, hall, waiting]) cell.style.gridRow = row;
+    label.style.gridColumn = '1';
+    hall.style.gridColumn = '2';
+    waiting.style.gridColumn = '3';
+    const buttons = {};
+    for (const dir of [UP, DOWN]) {
+      const exists = dir === UP ? f < n - 1 : f > 0;
+      const b = makeEl('button', `hall-btn${exists ? '' : ' none'}`, `<span class="dot">${dirArrow(dir)}</span><span class="tag"></span>`);
+      b.type = 'button';
+      b.dataset.floor = String(f);
+      b.dataset.dir = String(dir);
+      b.setAttribute('aria-label', `Call ${dir === UP ? 'up' : 'down'} at floor ${floorLabel(f)}`);
+      if (!exists) b.tabIndex = -1;
+      hall.append(b);
+      buttons[dir] = { el: b, tag: b.querySelector('.tag'), lit: false, name: '' };
+    }
+    el.append(label, hall, waiting);
+    view.floors[f] = { buttons, waiting, sig: '' };
+  }
+
+  sim.cars.forEach((car, i) => {
+    const shaft = makeEl('div', 'shaft');
+    shaft.style.gridColumn = String(4 + i);
+    shaft.style.gridRow = `2 / ${n + 2}`;
+    const carEl = makeEl('div', 'car',
+      '<div class="riders"></div><div class="door l"></div><div class="door r"></div><div class="loadbar"></div><span class="lantern"></span>');
+    shaft.append(carEl);
+    el.append(shaft);
+    Object.assign(view.cars[i], {
+      el: carEl,
+      riders: carEl.querySelector('.riders'),
+      doorL: carEl.querySelector('.door.l'),
+      doorR: carEl.querySelector('.door.r'),
+      loadbar: carEl.querySelector('.loadbar'),
+      lantern: carEl.querySelector('.lantern'),
+      load: -1, dir: null, floorText: '', overload: false,
+    });
+  });
+}
+
+/** Build one row per car in the cars panel (`view.rows`). */
+function buildCarRows() {
+  const box = byId('carStatus');
+  box.innerHTML = '';
+  view.rows = sim.cars.map((car) => {
+    const row = makeEl('div', 'car-row', `
+      <span class="badge">${car.name}</span>
+      <span class="pos"></span>
+      <span class="state"></span>
+      <div class="load"><div class="meter"><span></span></div><span class="load-text"></span></div>`);
+    box.append(row);
+    return {
+      row,
+      pos: row.querySelector('.pos'),
+      state: row.querySelector('.state'),
+      meter: row.querySelector('.meter span'),
+      loadText: row.querySelector('.load-text'),
+    };
+  });
+}
+
+/** Fill the Add trip lists with the building's floors. */
+function fillTripSelects() {
+  const opts = Array.from({ length: sim.cfg.floors }, (_, f) => `<option value="${f}">${floorLabel(f)}</option>`).join('');
+  byId('tripFrom').innerHTML = opts;
+  byId('tripTo').innerHTML = opts;
+  byId('tripTo').value = String(sim.cfg.floors - 1);
+}
+
+/** Wire up every control on the page. Called once at start-up. */
+function buildControls() {
+  const scenes = byId('scenes');
+  for (const s of SCENES) {
+    const b = makeEl('button', 'scene', `<strong>${s.label}</strong><span>${s.summary}</span>`);
+    b.type = 'button';
+    b.addEventListener('click', () => playScene(s));
+    scenes.append(b);
+  }
+
+  const strat = byId('strategies');
+  for (const s of Object.values(STRATEGIES)) {
+    const b = makeEl('button', 'strategy', `<strong>${s.label}</strong><span>${s.summary}</span>`);
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.dataset.id = s.id;
+    b.addEventListener('click', () => {
+      settings.strategy = s.id;
+      sim.setStrategy(s.id);
+      syncStrategyButtons();
+    });
+    strat.append(b);
+  }
+  syncStrategyButtons();
+
+  const pattern = byId('pattern');
+  pattern.innerHTML = Object.values(PATTERNS).map((p) => `<option value="${p.id}">${p.label}</option>`).join('');
+  pattern.value = settings.pattern;
+  pattern.addEventListener('change', () => {
+    settings.pattern = pattern.value;
+    sim.traffic.setPattern(pattern.value);
+  });
+
+  const rate = byId('rate');
+  syncRate();
+  rate.addEventListener('input', () => {
+    settings.rate = Number(rate.value);
+    sim.traffic.setRate(settings.rate);
+    syncRate();
+  });
+
+  // Floors and seed take effect on Reset; parking takes effect at once.
+  byId('floors').value = String(settings.floors);
+  byId('seed').value = String(settings.seed);
+  const park = byId('park');
+  park.checked = settings.park;
+  park.addEventListener('change', () => {
+    settings.park = park.checked;
+    sim.cfg.parkIdleAfter = park.checked ? DEFAULT_CONFIG.parkIdleAfter : 0;
+  });
+
+  byId('resetBtn').addEventListener('click', () => {
+    settings.floors = Math.max(4, Math.min(20, Math.round(Number(byId('floors').value) || 12)));
+    settings.seed = Math.max(1, Math.round(Number(byId('seed').value) || 1));
+    byId('floors').value = String(settings.floors);
+    byId('seed').value = String(settings.seed);
+    newSimulation();
+  });
+
+  byId('tripBtn').addEventListener('click', () => {
+    const from = Number(byId('tripFrom').value);
+    const to = Number(byId('tripTo').value);
+    if (from !== to) sim.spawn(from, to);
+  });
+
+  // A hall button adds one passenger at that floor, going to a random floor in that direction.
+  byId('building').addEventListener('click', (e) => {
+    const b = e.target.closest('.hall-btn');
+    if (!b || b.classList.contains('none')) return;
+    const f = Number(b.dataset.floor);
+    const dir = Number(b.dataset.dir);
+    const n = sim.cfg.floors;
+    const lo = dir === UP ? f + 1 : 0;
+    const hi = dir === UP ? n - 1 : f - 1;
+    sim.spawn(f, lo + Math.floor(Math.random() * (hi - lo + 1)));
+  });
+
+  const speed = byId('speedSeg');
+  speed.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-speed]');
+    if (!b) return;
+    settings.speed = Number(b.dataset.speed);
+    syncSpeedButtons();
+  });
+  syncSpeedButtons();
+
+  // Play/Pause button, or the space bar when no control has focus.
+  const toggle = () => setRunning(!running);
+  byId('playBtn').addEventListener('click', toggle);
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !e.target.closest('input, select, button, textarea')) {
+      e.preventDefault();
+      toggle();
+    }
+  });
+}
+
+/** Mark the selected strategy's button. */
+function syncStrategyButtons() {
+  for (const b of byId('strategies').children) b.setAttribute('aria-checked', String(b.dataset.id === settings.strategy));
+}
+
+/** Mark the selected speed button. */
+function syncSpeedButtons() {
+  for (const b of byId('speedSeg').children) b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === settings.speed));
+}
+
+/** Show `settings.rate` on the Arrivals slider and its label. */
+function syncRate() {
+  byId('rate').value = String(settings.rate);
+  byId('rateOut').textContent = settings.rate ? `${settings.rate} per min` : 'Manual only';
+}
+
+/**
+ * Run or pause the simulation clock, and update the Play/Pause button to match.
+ * @param {boolean} on
+ */
+function setRunning(on) {
+  running = on;
+  const play = byId('playBtn');
+  play.textContent = running ? 'Pause' : 'Play';
+  play.setAttribute('aria-pressed', String(running));
+}
+
+// ------------------------------------------------------------------ rendering
+
+/**
+ * Every animation frame: move the cars and their doors, update the indicators, hall
+ * buttons and waiting marks. Skips DOM writes for anything unchanged since last frame.
+ */
+function renderFrame() {
+  const n = sim.cfg.floors;
+  const H = sim.cfg.floorHeight;
+  const cap = sim.cfg.capacity;
+
+  sim.cars.forEach((car, i) => {
+    const v = view.cars[i];
+    v.el.style.transform = `translateY(${(n - 1 - car.pos / H) * view.rowH + 2}px)`;
+    v.doorL.style.transform = `scaleX(${1 - car.door})`;
+    v.doorR.style.transform = `scaleX(${1 - car.door})`;
+    if (v.load !== car.load) {
+      v.load = car.load;
+      v.riders.innerHTML = '<b></b>'.repeat(car.load);
+      v.loadbar.style.width = `${(100 * car.load) / cap}%`;
+    }
+    if (v.dir !== car.direction) {
+      v.dir = car.direction;
+      v.lantern.textContent = dirArrow(car.direction);
+      v.lantern.className = `lantern ${car.direction === UP ? 'up' : car.direction === DOWN ? 'down' : ''}`;
+      v.arrow.textContent = dirArrow(car.direction);
+    }
+    const ft = floorLabel(car.floor);
+    if (v.floorText !== ft) { v.floorText = ft; v.num.textContent = ft; }
+    if (v.overload !== car.isOverloaded) { v.overload = car.isOverloaded; v.el.classList.toggle('overload', v.overload); }
+  });
+
+  for (let f = 0; f < n; f++) {
+    const fv = view.floors[f];
+    for (const dir of [UP, DOWN]) {
+      const call = sim.hallCalls[f][dir];
+      const bv = fv.buttons[dir];
+      const lit = call !== null;
+      const name = lit ? sim.cars[call.carId].name : '';
+      if (bv.lit !== lit) { bv.lit = lit; bv.el.classList.toggle('lit', lit); }
+      if (bv.name !== name) { bv.name = name; bv.tag.textContent = name; }
+    }
+    // Waiting marks turn amber after 30 s and red after 60 s.
+    const q = sim.waiting[f];
+    const shown = q.slice(0, 14);
+    let sig = String(q.length);
+    let html = '';
+    for (const p of shown) {
+      const w = sim.time - p.spawnTime;
+      const heat = w > 60 ? 'hot' : w > 30 ? 'warm' : '';
+      sig += p.dir + heat;
+      html += `<i class="${heat}">${dirArrow(p.dir)}</i>`;
+    }
+    if (q.length > shown.length) html += `<span class="more">+${q.length - shown.length}</span>`;
+    if (sig !== fv.sig) { fv.sig = sig; fv.waiting.innerHTML = html; }
+  }
+}
+
+/** Four times a second: the clock, the stats tiles, the cars panel and the controller log. */
+function renderSlow() {
+  const s = sim.stats();
+  byId('clock').textContent = formatClock(sim.time);
+  byId('kpis').innerHTML = [
+    ['Average wait', secs(s.avgWait)],
+    ['95th pct wait', secs(s.p95Wait)],
+    ['Average trip', secs(s.avgTrip)],
+    ['Delivered', String(s.delivered)],
+    ['Waiting now', String(s.waitingNow)],
+    ['Longest wait now', secs(s.longestWaitNow)],
+  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+
+  const cap = sim.cfg.capacity;
+  sim.cars.forEach((car, i) => {
+    const r = view.rows[i];
+    const cls = car.direction === UP ? 'up' : car.direction === DOWN ? 'down' : '';
+    r.pos.innerHTML = `<span class="${cls}">${dirArrow(car.direction) || '·'}</span> ${floorLabel(car.floor)}`;
+    const state = car.isOverloaded ? '<b class="overload">Overload</b> · doors held open'
+      : car.state === CarState.MOVING ? `Moving ${car.speed.toFixed(1)} m/s` : STATE_TEXT[car.state];
+    const stops = car.plannedStops.map(floorLabel).join(' · ');
+    const detail = stops ? `Stops ${stops}` : 'No stops queued';
+    r.state.innerHTML = `${state}<span class="stops">${detail}</span>`;
+    r.meter.style.width = `${(100 * car.load) / cap}%`;
+    r.loadText.textContent = `${car.load}/${cap} · ${car.loadKg} kg`;
+    r.row.classList.toggle('overload', car.isOverloaded);
+  });
+
+  const recent = sim.events.slice(-8).reverse();
+  byId('log').innerHTML = recent.length
+    ? recent.map((e) => `<li class="${e.kind}"><time>${formatClock(e.t).slice(3)}</time><span>${e.text}</span></li>`).join('')
+    : '<li>No hall calls yet.</li>';
+}
+
+// ------------------------------------------------------------------ loop
+
+/** Timestamp of the previous animation frame, ms. */
+let last = performance.now();
+/** Simulated seconds owed but not yet stepped (less than one `dt`). */
+let carry = 0;
+/** Real seconds since the last `renderSlow`. */
+let slowTimer = 0;
+
+/**
+ * Animation loop: advance the simulation by `settings.speed` × the real time elapsed, in
+ * fixed steps (at most 1000 per frame, and at most 0.1 s of real time, so a background
+ * tab doesn't jump ahead), then draw.
+ * @param {number} now timestamp from requestAnimationFrame, ms
+ */
+function frame(now) {
+  const elapsed = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  if (running) {
+    carry += elapsed * settings.speed;
+    let steps = 0;
+    while (carry >= sim.dt && steps < 1000) {
+      sim.step();
+      carry -= sim.dt;
+      steps++;
+    }
+  }
+  renderFrame();
+  slowTimer += elapsed;
+  if (slowTimer >= 0.25) {
+    slowTimer = 0;
+    renderSlow();
+  }
+  requestAnimationFrame(frame);
+}
+
+buildControls();
+newSimulation();
+renderFrame();
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
