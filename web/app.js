@@ -117,7 +117,7 @@ const SCENES = [
   },
   {
     label: '3 · Wait equals trip',
-    summary: 'One person rides from L to 12. A car is already waiting at L.',
+    summary: 'One person rides from L to 12 in a car already waiting at L. They step in after about 2 s and ride for about 24 s, so Average wait should read about 2 s and Average trip 25.6 s.',
     setup(s) {
       s.spawn(0, 11);
     },
