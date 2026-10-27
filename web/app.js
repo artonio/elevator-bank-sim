@@ -94,7 +94,7 @@ const STATE_TEXT = {
 const SCENES = [
   {
     label: '1 · Floor 7 doors',
-    summary: 'Car A waits at 7. Two people arrive there: one going to 10, one going to 2.',
+    summary: 'Car A waits at 7. Two people arrive there: one going up to 10, one going down to 2. A should take the first person up to 10, then come back to 7 for the second; both should be out within a minute.',
     setup(s) {
       // Car A starts at floor index 6 (labelled 7); B and C stay at the lobby.
       s.cars[0].pos = 6 * s.cfg.floorHeight;
@@ -104,7 +104,7 @@ const SCENES = [
   },
   {
     label: '2 · Overload with two aboard',
-    summary: 'Car A waits at 5, B and C at 12. Twelve people at 5 go down to L, where two people are waiting to go up.',
+    summary: 'Car A waits at 5, B and C at 12. A brings twelve people down from 5 to L; they get out and two people get in. With two aboard, the cars panel should read 150 kg, and A should take them up to 8 and 10.',
     setup(s) {
       // Car A starts at floor index 4 (labelled 5); B and C start at the top, index 11.
       s.cars[0].pos = 4 * s.cfg.floorHeight;
